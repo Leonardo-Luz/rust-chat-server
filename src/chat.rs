@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+use serde_json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
@@ -9,6 +11,17 @@ pub type Tx = mpsc::UnboundedSender<Message>;
 pub struct Client {
     pub nickname: String,
     pub tx: Tx,
+    pub color: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ChatMessage {
+    pub msg_type: String,
+    pub sender: String,
+    pub color: String,
+    pub content: String,
+    pub room: String,
+    pub client_count: usize,
 }
 
 #[derive(Clone)]
@@ -48,9 +61,17 @@ impl ChatState {
                 }
             });
             if removed {
-                let exit_msg = format!("{} has left the room...", client.nickname);
+                let exit_msg = ChatMessage {
+                    msg_type: "info".to_string(),
+                    sender: "server".to_string(),
+                    color: "0000ff".to_string(),
+                    content: format!("{} has left the room...", client.nickname),
+                    room: room.to_string(),
+                    client_count: r.clients.len(),
+                };
+                let json_msg = serde_json::to_string(&exit_msg).unwrap();
                 r.clients
-                    .retain(|c| c.tx.send(Message::Text(exit_msg.clone())).is_ok());
+                    .retain(|c| c.tx.send(Message::Text(json_msg.clone())).is_ok());
             }
         }
 
@@ -60,9 +81,17 @@ impl ChatState {
                 if r.password.as_ref() != password.as_ref() {
                     return Err("Incorrect password".to_string());
                 }
-                let exit_msg = format!("{} has joined the room...", client.nickname);
+                let join_msg = ChatMessage {
+                    msg_type: "info".to_string(),
+                    sender: "server".to_string(),
+                    color: "0000ff".to_string(),
+                    content: format!("{} has joined the room...", client.nickname),
+                    room: room.to_string(),
+                    client_count: r.clients.len() + 1,
+                };
+                let json_msg = serde_json::to_string(&join_msg).unwrap();
                 r.clients
-                    .retain(|c| c.tx.send(Message::Text(exit_msg.clone())).is_ok());
+                    .retain(|c| c.tx.send(Message::Text(json_msg.clone())).is_ok());
                 r.clients.push(client);
                 Ok(())
             }
@@ -85,10 +114,18 @@ impl ChatState {
         if let Some(r) = self.rooms.get_mut(room) {
             // Find the sender nickname
             if let Some(sender) = r.clients.iter().find(|c| c.tx.same_channel(sender_tx)) {
-                let full_msg = format!("[{}] {}: {}", room, sender.nickname, msg);
+                let chat_msg = ChatMessage {
+                    msg_type: "chat".to_string(),
+                    sender: sender.nickname.clone(),
+                    color: sender.color.clone(),
+                    content: msg.to_string(),
+                    room: room.to_string(),
+                    client_count: r.clients.len(),
+                };
+                let json_msg = serde_json::to_string(&chat_msg).unwrap();
 
                 r.clients
-                    .retain(|c| c.tx.send(Message::Text(full_msg.clone())).is_ok());
+                    .retain(|c| c.tx.send(Message::Text(json_msg.clone())).is_ok());
             }
         }
     }
